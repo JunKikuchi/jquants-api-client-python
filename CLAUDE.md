@@ -63,7 +63,7 @@ jquantsapi/
 
 ### 設計パターン
 
-- **クライアント層**（`client.py`, `client_v2.py`）: HTTP通信、設定読み込み、セッション管理、リトライ制御（tenacity）、スレッドプール（MAX_WORKERS=5）、レートリミット（`SharedRateLimiter`）
+- **クライアント層**（`client.py`, `client_v2.py`）: HTTP通信、設定読み込み、セッション管理、リトライ制御（V1: tenacity、V2: urllib3 Retry + 指数バックオフ）、スレッドプール（MAX_WORKERS=5）、レートリミット（`SharedRateLimiter`）
 - **API層**（`apis/`）: 各エンドポイントごとに`BaseApi`を継承したクラスを実装。`execute()`メソッドでDataFrameを返す
 - **`SupportsRequest` Protocol**: クライアントが満たすべき最小インターフェース（`JQUANTS_API_BASE`, `RAW_ENCODING`, `_get()`）
 
@@ -99,6 +99,15 @@ jquantsapi/
 | `rate_limit_lock_file` | `JQUANTS_API_RATE_LIMIT_LOCK_FILE` | ロックファイルのパス | `/tmp/jquants_rate.lock` |
 
 デフォルトは Free プラン（5リクエスト/分）。`ClientV2(rate_limiter=None)` で無効化可能。
+
+### リトライ設定
+
+429/5xx エラー時に指数バックオフ付きでリトライ。設定ファイルと環境変数の両方で設定可能。環境変数が優先される。
+
+| 設定ファイルキー | 環境変数 | 説明 | デフォルト値 |
+|----------------|---------|------|------------|
+| `retry_total` | `JQUANTS_API_RETRY_TOTAL` | 最大リトライ回数 | `10` |
+| `retry_backoff_factor` | `JQUANTS_API_RETRY_BACKOFF_FACTOR` | 指数バックオフの係数 | `1` |
 
 ## ビルド・リリース
 

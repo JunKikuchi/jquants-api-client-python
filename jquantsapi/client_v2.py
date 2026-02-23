@@ -84,6 +84,12 @@ class ClientV2:
                           環境変数は設定ファイルより優先されます。
                           None を渡すとレートリミットを無効化します。
 
+        リトライ設定:
+            429/5xx エラー時に指数バックオフ付きでリトライします。
+            設定ファイル (retry_total, retry_backoff_factor)
+            または環境変数 (JQUANTS_API_RETRY_TOTAL, JQUANTS_API_RETRY_BACKOFF_FACTOR)
+            で変更可能です。デフォルト: 最大10回、バックオフ係数1（1s, 2s, 4s, ...）。
+
         設定の読み込み順序（後のものが優先）:
             1. /content/drive/MyDrive/drive_ws/secret/jquants-api.toml (Google Colab のみ)
             2. ${HOME}/.jquants-api/jquants-api.toml
@@ -120,6 +126,19 @@ class ClientV2:
             )
         else:
             self._rate_limiter = rate_limiter
+
+        # リトライ設定
+        self._retry_total = int(config.get("retry_total", 10))
+        self._retry_backoff_factor = float(config.get("retry_backoff_factor", 1))
+        # 環境変数が設定されている場合は上書き
+        self._retry_total = int(
+            os.environ.get("JQUANTS_API_RETRY_TOTAL", self._retry_total)
+        )
+        self._retry_backoff_factor = float(
+            os.environ.get(
+                "JQUANTS_API_RETRY_BACKOFF_FACTOR", self._retry_backoff_factor
+            )
+        )
 
         # API 実装 (v2)
         self._eq_master_api = EqMasterApiV2()
@@ -223,7 +242,8 @@ class ClientV2:
 
         if self._session is None:
             retry_strategy = Retry(
-                total=3,
+                total=self._retry_total,
+                backoff_factor=self._retry_backoff_factor,
                 status_forcelist=status_forcelist,
                 allowed_methods=allowed_methods,
             )

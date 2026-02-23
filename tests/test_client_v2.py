@@ -534,3 +534,73 @@ def test_rate_limiter_env_overrides_config():
         assert cli._rate_limiter is not None
         assert cli._rate_limiter.rate == 500.0  # 環境変数で上書き
         assert cli._rate_limiter.per == 60.0  # 設定ファイルの値
+
+
+# ------------------------------------------------------------------
+# リトライ設定テスト
+# ------------------------------------------------------------------
+
+
+def test_default_retry_settings():
+    """デフォルトのリトライ設定の確認"""
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ):
+        cli = jquantsapi.ClientV2()
+        assert cli._retry_total == 10
+        assert cli._retry_backoff_factor == 1
+
+
+def test_retry_settings_from_config():
+    """設定ファイルからリトライ設定を読み込めることの確認"""
+    config = {
+        "api_key": "dummy_key",
+        "retry_total": 5,
+        "retry_backoff_factor": 0.5,
+    }
+    with patch.object(jquantsapi.ClientV2, "_load_config", return_value=config):
+        cli = jquantsapi.ClientV2()
+        assert cli._retry_total == 5
+        assert cli._retry_backoff_factor == 0.5
+
+
+def test_retry_settings_env_vars():
+    """環境変数でリトライ設定を変更できることの確認"""
+    env = {
+        "JQUANTS_API_RETRY_TOTAL": "20",
+        "JQUANTS_API_RETRY_BACKOFF_FACTOR": "2.0",
+    }
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ), patch.dict(client_v2.os.environ, env, clear=False):
+        cli = jquantsapi.ClientV2()
+        assert cli._retry_total == 20
+        assert cli._retry_backoff_factor == 2.0
+
+
+def test_retry_env_overrides_config():
+    """環境変数がリトライ設定ファイルの値を上書きすることの確認"""
+    config = {
+        "api_key": "dummy_key",
+        "retry_total": 5,
+        "retry_backoff_factor": 0.5,
+    }
+    env = {"JQUANTS_API_RETRY_TOTAL": "15"}
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value=config
+    ), patch.dict(client_v2.os.environ, env, clear=False):
+        cli = jquantsapi.ClientV2()
+        assert cli._retry_total == 15  # 環境変数で上書き
+        assert cli._retry_backoff_factor == 0.5  # 設定ファイルの値
+
+
+def test_retry_settings_applied_to_session():
+    """リトライ設定がセッションに反映されることの確認"""
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ):
+        cli = jquantsapi.ClientV2()
+        session = cli._request_session()
+        adapter = session.get_adapter("https://api.jquants.com")
+        assert adapter.max_retries.total == 10
+        assert adapter.max_retries.backoff_factor == 1
