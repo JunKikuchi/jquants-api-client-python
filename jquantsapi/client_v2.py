@@ -42,8 +42,11 @@ from jquantsapi.apis.v2.markets import (
     MktShortSaleReportApiV2,
 )
 from jquantsapi.enums import BulkEndpoint
+from jquantsapi.rate_limiter import SharedRateLimiter
 
 DatetimeLike = Union[datetime, pd.Timestamp, str]
+
+_RATE_LIMITER_SENTINEL = object()
 
 
 class ClientV2:
@@ -63,11 +66,23 @@ class ClientV2:
     RAW_ENCODING = "utf-8"
     MAX_WORKERS = 5
 
-    def __init__(self, api_key: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        rate_limiter: Optional[SharedRateLimiter] = _RATE_LIMITER_SENTINEL,  # type: ignore[assignment]
+    ) -> None:
         """
         Args:
             api_key: J-Quants API v2 の API キー
                      未指定の場合は設定ファイルまたは環境変数から取得します。
+            rate_limiter: レートリミッター。
+                          未指定の場合は SharedRateLimiter(rate=5, per=60.0) が使用されます
+                          （Freeプラン: 5リクエスト/分）。
+                          設定ファイル (rate_limit, rate_limit_per, rate_limit_lock_file)
+                          または環境変数 (JQUANTS_API_RATE_LIMIT, JQUANTS_API_RATE_LIMIT_PER,
+                          JQUANTS_API_RATE_LIMIT_LOCK_FILE) でデフォルト値を変更可能です。
+                          環境変数は設定ファイルより優先されます。
+                          None を渡すとレートリミットを無効化します。
 
         設定の読み込み順序（後のものが優先）:
             1. /content/drive/MyDrive/drive_ws/secret/jquants-api.toml (Google Colab のみ)
@@ -89,6 +104,22 @@ class ClientV2:
             )
 
         self._session: Optional[requests.Session] = None
+
+        if rate_limiter is _RATE_LIMITER_SENTINEL:
+            rate = float(config.get("rate_limit", 5))
+            per = float(config.get("rate_limit_per", 60.0))
+            lock_file = str(
+                config.get("rate_limit_lock_file", "/tmp/jquants_rate.lock")
+            )
+            # 環境変数が設定されている場合は上書き
+            rate = float(os.environ.get("JQUANTS_API_RATE_LIMIT", rate))
+            per = float(os.environ.get("JQUANTS_API_RATE_LIMIT_PER", per))
+            lock_file = os.environ.get("JQUANTS_API_RATE_LIMIT_LOCK_FILE", lock_file)
+            self._rate_limiter: Optional[SharedRateLimiter] = SharedRateLimiter(
+                rate=rate, per=per, lock_file=lock_file
+            )
+        else:
+            self._rate_limiter = rate_limiter
 
         # API 実装 (v2)
         self._eq_master_api = EqMasterApiV2()
@@ -222,6 +253,8 @@ class ClientV2:
         """
         GET リクエスト用ラッパー
         """
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
         session = self._request_session()
         headers = self._base_headers()
         resp = session.get(url, params=params, headers=headers, timeout=30)

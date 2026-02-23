@@ -8,6 +8,7 @@ from dateutil import tz
 
 import jquantsapi
 from jquantsapi import client_v2
+from jquantsapi.rate_limiter import SharedRateLimiter
 
 
 @pytest.mark.parametrize(
@@ -401,3 +402,135 @@ def test_get_bulk():
         args, _ = mock_get.call_args
         assert args[1] == {"key": "2024/01/01/eq_master.csv"}
         assert ret == "https://example.com/data.csv"
+
+
+# ------------------------------------------------------------------
+# レートリミッター統合テスト
+# ------------------------------------------------------------------
+
+
+def test_default_rate_limiter():
+    """デフォルトでレートリミッターが有効であることの確認"""
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ):
+        cli = jquantsapi.ClientV2()
+        assert cli._rate_limiter is not None
+        assert isinstance(cli._rate_limiter, SharedRateLimiter)
+        assert cli._rate_limiter.rate == 5
+        assert cli._rate_limiter.per == 60.0
+
+
+def test_rate_limiter_disabled():
+    """rate_limiter=Noneで無効化できることの確認"""
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ):
+        cli = jquantsapi.ClientV2(rate_limiter=None)
+        assert cli._rate_limiter is None
+
+
+def test_custom_rate_limiter(tmp_path):
+    """カスタムSharedRateLimiterインスタンスの受け渡し確認"""
+    lock_file = str(tmp_path / "custom.lock")
+    custom_limiter = SharedRateLimiter(rate=5, per=2.0, lock_file=lock_file)
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ):
+        cli = jquantsapi.ClientV2(rate_limiter=custom_limiter)
+        assert cli._rate_limiter is custom_limiter
+        assert cli._rate_limiter.rate == 5
+        assert cli._rate_limiter.per == 2.0
+
+
+def test_get_calls_acquire():
+    """_get()呼び出し時にacquire()が呼ばれることの確認"""
+    mock_limiter = MagicMock(spec=SharedRateLimiter)
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ), patch.object(jquantsapi.ClientV2, "_request_session") as mock_session:
+        mock_session.return_value.get.return_value.raise_for_status = MagicMock()
+        cli = jquantsapi.ClientV2(rate_limiter=mock_limiter)
+        cli._get("https://example.com/test")
+        mock_limiter.acquire.assert_called_once()
+
+
+def test_get_without_rate_limiter():
+    """rate_limiter=Noneの場合、acquire()が呼ばれないことの確認"""
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ), patch.object(jquantsapi.ClientV2, "_request_session") as mock_session:
+        mock_session.return_value.get.return_value.raise_for_status = MagicMock()
+        cli = jquantsapi.ClientV2(rate_limiter=None)
+        cli._get("https://example.com/test")
+        # rate_limiter が None なので acquire は呼ばれない（エラーにならない）
+
+
+@pytest.mark.parametrize(
+    "env, exp_rate, exp_per",
+    (
+        # JQUANTS_API_RATE_LIMIT のみ設定
+        ({"JQUANTS_API_RATE_LIMIT": "120"}, 120.0, 60.0),
+        # JQUANTS_API_RATE_LIMIT_PER のみ設定
+        ({"JQUANTS_API_RATE_LIMIT_PER": "1.0"}, 5.0, 1.0),
+        # 両方設定
+        (
+            {"JQUANTS_API_RATE_LIMIT": "20", "JQUANTS_API_RATE_LIMIT_PER": "5.0"},
+            20.0,
+            5.0,
+        ),
+    ),
+)
+def test_rate_limiter_env_vars(env, exp_rate, exp_per):
+    """環境変数でデフォルトレートリミット設定を変更できることの確認"""
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ), patch.dict(client_v2.os.environ, env, clear=False):
+        cli = jquantsapi.ClientV2()
+        assert cli._rate_limiter is not None
+        assert cli._rate_limiter.rate == exp_rate
+        assert cli._rate_limiter.per == exp_per
+
+
+def test_rate_limiter_lock_file_env_var():
+    """環境変数でlock_fileを変更できることの確認"""
+    env = {"JQUANTS_API_RATE_LIMIT_LOCK_FILE": "/tmp/custom_rate.lock"}
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ), patch.dict(client_v2.os.environ, env, clear=False):
+        cli = jquantsapi.ClientV2()
+        assert cli._rate_limiter is not None
+        assert cli._rate_limiter.lock_file == "/tmp/custom_rate.lock"
+
+
+def test_rate_limiter_from_config():
+    """設定ファイルからレートリミット設定を読み込めることの確認"""
+    config = {
+        "api_key": "dummy_key",
+        "rate_limit": 120,
+        "rate_limit_per": 60.0,
+        "rate_limit_lock_file": "/tmp/config_rate.lock",
+    }
+    with patch.object(jquantsapi.ClientV2, "_load_config", return_value=config):
+        cli = jquantsapi.ClientV2()
+        assert cli._rate_limiter is not None
+        assert cli._rate_limiter.rate == 120.0
+        assert cli._rate_limiter.per == 60.0
+        assert cli._rate_limiter.lock_file == "/tmp/config_rate.lock"
+
+
+def test_rate_limiter_env_overrides_config():
+    """環境変数が設定ファイルの値を上書きすることの確認"""
+    config = {
+        "api_key": "dummy_key",
+        "rate_limit": 120,
+        "rate_limit_per": 60.0,
+    }
+    env = {"JQUANTS_API_RATE_LIMIT": "500"}
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value=config
+    ), patch.dict(client_v2.os.environ, env, clear=False):
+        cli = jquantsapi.ClientV2()
+        assert cli._rate_limiter is not None
+        assert cli._rate_limiter.rate == 500.0  # 環境変数で上書き
+        assert cli._rate_limiter.per == 60.0  # 設定ファイルの値

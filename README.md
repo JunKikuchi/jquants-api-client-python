@@ -224,6 +224,32 @@ API レスポンスが Dataframe の形式で取得できます。
 J-Quants API には、サービスの安定稼働を目的としてレートリミット（利用頻度の制限）が設けられています。
 プランごとのレートリミットの詳細については、[公式ドキュメント](https://jpx-jquants.com/spec/rate-limits) をご参照ください。
 
+### クライアント側のレートリミット
+
+`ClientV2` にはトークンバケット方式のレートリミッター（`SharedRateLimiter`）が組み込まれており、デフォルトで有効です（Free プラン: 5リクエスト/分）。
+
+```python
+# デフォルト（Free プラン: 5リクエスト/分）
+cli = jquantsapi.ClientV2()
+
+# カスタム設定（例: Standard プラン: 120リクエスト/分）
+from jquantsapi import SharedRateLimiter
+cli = jquantsapi.ClientV2(rate_limiter=SharedRateLimiter(rate=120, per=60.0))
+
+# レートリミットを無効化
+cli = jquantsapi.ClientV2(rate_limiter=None)
+```
+
+環境変数でデフォルト値を変更することも可能です。
+
+| 環境変数 | 説明 | デフォルト値 |
+|---------|------|------------|
+| `JQUANTS_API_RATE_LIMIT` | 時間窓あたりの最大リクエスト数 | `5` |
+| `JQUANTS_API_RATE_LIMIT_PER` | 時間窓の秒数 | `60.0` |
+| `JQUANTS_API_RATE_LIMIT_LOCK_FILE` | ロックファイルのパス | `/tmp/jquants_rate.lock` |
+
+レートリミッターは `fcntl.flock` によるファイルロックを使用しており、複数プロセス間でもレートリミットを共有できます（Unix/macOS のみ）。
+
 ### 注意事項
 
 サフィックスが `_range` で終わるメソッド（例: `get_eq_bars_daily_range`、`get_fin_summary_range` など）は、指定された日付範囲に対して並列処理で繰り返し API リクエストを行います。
@@ -252,6 +278,9 @@ API キーは設定ファイルおよび環境変数を使用して指定する�
 ```toml
 [jquants-api-client]
 api_key = "*****"
+rate_limit = 5          # 時間窓あたりの最大リクエスト数（デフォルト: 5）
+rate_limit_per = 60.0   # 時間窓の秒数（デフォルト: 60.0）
+rate_limit_lock_file = "/tmp/jquants_rate.lock"  # ロックファイルのパス
 ```
 
 ### V1 (Client) - Deprecated
