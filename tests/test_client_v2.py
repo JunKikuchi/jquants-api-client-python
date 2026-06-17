@@ -1,18 +1,20 @@
 from contextlib import nullcontext as does_not_raise
 from datetime import datetime
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+import requests
 from dateutil import tz
 
 import jquantsapi
-from jquantsapi import client_v2
+from jquantsapi import client_v2, constants
 from jquantsapi.rate_limiter import SharedRateLimiter
 
 
 @pytest.mark.parametrize(
-    "api_key," "env, isfile, load," "exp_api_key," "exp_raise",
+    "api_key,env, isfile, load,exp_api_key,exp_raise",
     (
         # Case 1: api_key未指定、設定ファイルなし、環境変数なし → エラー
         (
@@ -133,14 +135,13 @@ def test_client_v2_config(
     exp_raise,
 ):
     """ClientV2の設定ファイルと環境変数からのapi_key読み込みテスト"""
-    with exp_raise, patch.object(
-        jquantsapi.ClientV2, "_is_colab", return_value=True
-    ), patch.object(client_v2.os.path, "isfile", side_effect=isfile), patch(
-        "builtins.open"
-    ), patch.dict(
-        client_v2.os.environ, env, clear=True
-    ), patch.object(
-        client_v2.tomllib, "load", side_effect=load
+    with (
+        exp_raise,
+        patch.object(jquantsapi.ClientV2, "_is_colab", return_value=True),
+        patch.object(client_v2.os.path, "isfile", side_effect=isfile),
+        patch("builtins.open"),
+        patch.dict(client_v2.os.environ, env, clear=True),
+        patch.object(client_v2.tomllib, "load", side_effect=load),
     ):
         cli = jquantsapi.ClientV2(api_key=api_key)
         assert cli._api_key == exp_api_key
@@ -161,9 +162,13 @@ def test_get_eq_master(code, date_yyyymmdd, exp_params):
     exp_ret_len = 0
     exp_raise = does_not_raise()
 
-    with exp_raise, patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.object(jquantsapi.ClientV2, "_get_paginated") as mock_get_paginated:
+    with (
+        exp_raise,
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get_paginated") as mock_get_paginated,
+    ):
         mock_get_paginated.return_value = ret_value
 
         cli = jquantsapi.ClientV2()
@@ -197,9 +202,13 @@ def test_get_eq_bars_daily(code, from_yyyymmdd, to_yyyymmdd, date_yyyymmdd, exp_
     exp_ret_len = 0
     exp_raise = does_not_raise()
 
-    with exp_raise, patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.object(jquantsapi.ClientV2, "_get") as mock_get:
+    with (
+        exp_raise,
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
         mock_get.return_value.json.return_value = ret_value
 
         cli = jquantsapi.ClientV2()
@@ -362,45 +371,87 @@ def test_aggregate_bars_n_minute_15min():
 
 
 @pytest.mark.parametrize(
-    "endpoint, exp_params",
+    "kwargs, exp_params",
     (
-        ("/equities/master", {"endpoint": "/equities/master"}),
-        ("/equities/bars/daily", {"endpoint": "/equities/bars/daily"}),
-        ("/fins/summary", {"endpoint": "/fins/summary"}),
+        (
+            {"endpoint": "/equities/master"},
+            {"endpoint": "/equities/master"},
+        ),
+        (
+            {"endpoint": "/equities/bars/daily"},
+            {"endpoint": "/equities/bars/daily"},
+        ),
+        (
+            {"endpoint": "/fins/summary"},
+            {"endpoint": "/fins/summary"},
+        ),
+        (
+            {"date": "2024-01"},
+            {"date": "2024-01"},
+        ),
+        (
+            {
+                "endpoint": "/equities/bars/daily",
+                "from_date": "2024-01",
+                "to_date": "2024-03",
+            },
+            {"endpoint": "/equities/bars/daily", "from": "2024-01", "to": "2024-03"},
+        ),
     ),
 )
-def test_get_bulk_list(endpoint, exp_params):
+def test_get_bulk_list(kwargs, exp_params):
     """get_bulk_listのパラメータテスト"""
     ret_value = {"data": []}  # resp.json()で返される辞書
     exp_ret_len = 0
     exp_raise = does_not_raise()
 
-    with exp_raise, patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.object(jquantsapi.ClientV2, "_get") as mock_get:
+    with (
+        exp_raise,
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
         mock_get.return_value.json.return_value = ret_value
 
         cli = jquantsapi.ClientV2()
-        ret = cli.get_bulk_list(endpoint=endpoint)
+        ret = cli.get_bulk_list(**kwargs)
         args, _ = mock_get.call_args
         assert args[1] == exp_params
         assert len(ret) == exp_ret_len
 
 
-def test_get_bulk():
+@pytest.mark.parametrize(
+    "kwargs, exp_params",
+    (
+        (
+            {"key": "2024/01/01/eq_master.csv"},
+            {"key": "2024/01/01/eq_master.csv"},
+        ),
+        (
+            {"endpoint": "/equities/bars/daily", "date": "2024-01"},
+            {"endpoint": "/equities/bars/daily", "date": "2024-01"},
+        ),
+    ),
+)
+def test_get_bulk(kwargs, exp_params):
     """get_bulkのテスト"""
     ret_value = {"url": "https://example.com/data.csv"}  # resp.json()で返される辞書
     exp_raise = does_not_raise()
 
-    with exp_raise, patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.object(jquantsapi.ClientV2, "_get") as mock_get:
+    with (
+        exp_raise,
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
         mock_get.return_value.json.return_value = ret_value
 
         cli = jquantsapi.ClientV2()
-        ret = cli.get_bulk(key="2024/01/01/eq_master.csv")
+        ret = cli.get_bulk(**kwargs)
         args, _ = mock_get.call_args
-        assert args[1] == {"key": "2024/01/01/eq_master.csv"}
+        assert args[1] == exp_params
         assert ret == "https://example.com/data.csv"
 
 
@@ -446,9 +497,12 @@ def test_custom_rate_limiter(tmp_path):
 def test_get_calls_acquire():
     """_get()呼び出し時にacquire()が呼ばれることの確認"""
     mock_limiter = MagicMock(spec=SharedRateLimiter)
-    with patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.object(jquantsapi.ClientV2, "_request_session") as mock_session:
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_request_session") as mock_session,
+    ):
         mock_session.return_value.get.return_value.raise_for_status = MagicMock()
         cli = jquantsapi.ClientV2(rate_limiter=mock_limiter)
         cli._get("https://example.com/test")
@@ -457,9 +511,12 @@ def test_get_calls_acquire():
 
 def test_get_without_rate_limiter():
     """rate_limiter=Noneの場合、acquire()が呼ばれないことの確認"""
-    with patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.object(jquantsapi.ClientV2, "_request_session") as mock_session:
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_request_session") as mock_session,
+    ):
         mock_session.return_value.get.return_value.raise_for_status = MagicMock()
         cli = jquantsapi.ClientV2(rate_limiter=None)
         cli._get("https://example.com/test")
@@ -483,9 +540,12 @@ def test_get_without_rate_limiter():
 )
 def test_rate_limiter_env_vars(env, exp_rate, exp_per):
     """環境変数でデフォルトレートリミット設定を変更できることの確認"""
-    with patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.dict(client_v2.os.environ, env, clear=False):
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
         cli = jquantsapi.ClientV2()
         assert cli._rate_limiter is not None
         assert cli._rate_limiter.rate == exp_rate
@@ -495,9 +555,12 @@ def test_rate_limiter_env_vars(env, exp_rate, exp_per):
 def test_rate_limiter_lock_file_env_var():
     """環境変数でlock_fileを変更できることの確認"""
     env = {"JQUANTS_API_RATE_LIMIT_LOCK_FILE": "/tmp/custom_rate.lock"}
-    with patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.dict(client_v2.os.environ, env, clear=False):
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
         cli = jquantsapi.ClientV2()
         assert cli._rate_limiter is not None
         assert cli._rate_limiter.lock_file == "/tmp/custom_rate.lock"
@@ -527,9 +590,10 @@ def test_rate_limiter_env_overrides_config():
         "rate_limit_per": 60.0,
     }
     env = {"JQUANTS_API_RATE_LIMIT": "500"}
-    with patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value=config
-    ), patch.dict(client_v2.os.environ, env, clear=False):
+    with (
+        patch.object(jquantsapi.ClientV2, "_load_config", return_value=config),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
         cli = jquantsapi.ClientV2()
         assert cli._rate_limiter is not None
         assert cli._rate_limiter.rate == 500.0  # 環境変数で上書き
@@ -570,9 +634,12 @@ def test_retry_settings_env_vars():
         "JQUANTS_API_RETRY_TOTAL": "20",
         "JQUANTS_API_RETRY_BACKOFF_FACTOR": "2.0",
     }
-    with patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
-    ), patch.dict(client_v2.os.environ, env, clear=False):
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
         cli = jquantsapi.ClientV2()
         assert cli._retry_total == 20
         assert cli._retry_backoff_factor == 2.0
@@ -586,9 +653,10 @@ def test_retry_env_overrides_config():
         "retry_backoff_factor": 0.5,
     }
     env = {"JQUANTS_API_RETRY_TOTAL": "15"}
-    with patch.object(
-        jquantsapi.ClientV2, "_load_config", return_value=config
-    ), patch.dict(client_v2.os.environ, env, clear=False):
+    with (
+        patch.object(jquantsapi.ClientV2, "_load_config", return_value=config),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
         cli = jquantsapi.ClientV2()
         assert cli._retry_total == 15  # 環境変数で上書き
         assert cli._retry_backoff_factor == 0.5  # 設定ファイルの値
@@ -604,3 +672,464 @@ def test_retry_settings_applied_to_session():
         adapter = session.get_adapter("https://api.jquants.com")
         assert adapter.max_retries.total == 10
         assert adapter.max_retries.backoff_factor == 1
+
+
+def test_download_bulk_by_endpoint():
+    """download_bulk_by_endpointのパラメータテスト"""
+    download_url = "https://example.com/data.csv.gz"
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+        patch.object(jquantsapi.ClientV2, "_request_session") as mock_session,
+    ):
+        mock_get.return_value.json.return_value = {"url": download_url}
+        mock_response = MagicMock()
+        mock_response.ok = True
+        mock_response.iter_content.return_value = []
+        mock_session.return_value.get.return_value = mock_response
+
+        cli = jquantsapi.ClientV2()
+        with pytest.raises(ValueError):
+            cli.download_bulk_by_endpoint(
+                endpoint="/equities/bars/daily", date="2024-01", output_path=""
+            )
+
+        cli.download_bulk_by_endpoint(
+            endpoint="/equities/bars/daily",
+            date="2024-01",
+            output_path="/tmp/test.csv.gz",
+        )
+        args, _ = mock_get.call_args
+        assert args[1] == {"endpoint": "/equities/bars/daily", "date": "2024-01"}
+
+
+TD_RECORD = {
+    "DiscNo": "20250401130100",
+    "Code": "86970",
+    "Name": "日本取引所グループ",
+    "DiscDate": "2025-04-01",
+    "DiscTime": "08:00",
+    "Title": "決算短信",
+    "DiscStatus": None,
+    "RevNo": 1,
+    "DiscItems": ["14012"],
+    "Docs": ["g", "s"],
+}
+
+
+@pytest.mark.parametrize(
+    "kwargs, exp_params",
+    (
+        (
+            {"date": "20250401"},
+            {"date": "20250401"},
+        ),
+        (
+            {"code": "86970"},
+            {"code": "86970"},
+        ),
+        (
+            {"code": "86970", "from_date": "20250301", "to_date": "20250401"},
+            {"code": "86970", "from": "20250301", "to": "20250401"},
+        ),
+        (
+            {"date": "20250401", "disc_items": "10010,10020"},
+            {"date": "20250401", "discItems": "10010,10020"},
+        ),
+    ),
+)
+def test_get_td_list(kwargs, exp_params):
+    """get_td_listのパラメータテスト: tuple(DataFrame, cursor)を返す"""
+    ret_value = {"data": [TD_RECORD]}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_td_list(**kwargs)
+        args, _ = mock_get.call_args
+        assert args[1] == exp_params
+        assert len(df) == 1
+        assert cursor is None
+
+
+def test_get_td_list_returns_cursor():
+    """get_td_listがレスポンスのcursorを返すことを確認"""
+    cursor_value = "eyJkIjoiMjAyNS0wNC0wMSJ9"
+    ret_value = {"data": [TD_RECORD], "cursor": cursor_value}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_td_list(date="20250401")
+        assert len(df) == 1
+        assert cursor == cursor_value
+
+
+def test_get_td_list_with_pagination():
+    """get_td_listがpagination_keyを自動処理して全件取得することを確認"""
+    page1 = {"data": [TD_RECORD], "pagination_key": "page2key"}
+    page2 = {"data": [TD_RECORD], "cursor": "eyJkIjoiMjAyNS0wNC0wMSJ9"}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.side_effect = [page1, page2]
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_td_list(date="20250401")
+        assert len(df) == 2
+        assert cursor == "eyJkIjoiMjAyNS0wNC0wMSJ9"
+        assert mock_get.call_count == 2
+
+
+def test_get_td_files():
+    """get_td_filesのテスト"""
+    ret_value = {
+        "discNo": "20250401130100",
+        "files": {
+            "pdf": "https://example.com/pdf",
+            "summaryPdf": "https://example.com/summary",
+            "xbrl": "https://example.com/xbrl",
+        },
+    }
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        ret = cli.get_td_files(disc_no="20250401130100")
+        args, _ = mock_get.call_args
+        assert args[1] == {"discNo": "20250401130100"}
+        assert ret["discNo"] == "20250401130100"
+        assert ret["files"]["pdf"] == "https://example.com/pdf"
+
+
+def test_get_td_files_with_docs():
+    """get_td_files docs パラメータのテスト"""
+    ret_value = {
+        "discNo": "20250401130100",
+        "files": {"pdf": "https://example.com/pdf"},
+    }
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        cli.get_td_files(disc_no="20250401130100", docs="g,s")
+        args, _ = mock_get.call_args
+        assert args[1] == {"discNo": "20250401130100", "docs": "g,s"}
+
+
+def test_get_td_bulk():
+    """get_td_bulkのテスト"""
+    ret_value = {
+        "lastUpdated": "2025-04-01T08:00:00Z",
+        "url": "https://example.com/bulk.csv.gz",
+    }
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        ret = cli.get_td_bulk()
+        assert ret["lastUpdated"] == "2025-04-01T08:00:00Z"
+        assert ret["url"] == "https://example.com/bulk.csv.gz"
+
+
+FIN_SUMMARY_RECORD: dict[str, Any] = {
+    col: None for col in constants.FIN_SUMMARY_COLUMNS_V2
+}
+FIN_SUMMARY_RECORD.update(
+    {
+        "DiscDate": "2025-04-01",
+        "DiscTime": "08:00",
+        "Code": "86970",
+        "DiscNo": "20250401130100",
+    }
+)
+
+FIN_DETAILS_RECORD = {
+    "DiscDate": "2025-04-01",
+    "DiscTime": "08:00",
+    "Code": "86970",
+    "DiscNo": "20250401130100",
+}
+
+
+def test_get_fin_summary_cursor():
+    """get_fin_summary_cursorがtuple(DataFrame, cursor)を返すことを確認"""
+    ret_value = {"data": [FIN_SUMMARY_RECORD]}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_fin_summary_cursor(code="86970")
+        args, _ = mock_get.call_args
+        assert args[1] == {"code": "86970"}
+        assert len(df) == 1
+        assert cursor is None
+
+
+def test_get_fin_summary_cursor_passes_cursor_param():
+    """get_fin_summary_cursorがcursor引数をクエリパラメータに渡すことを確認"""
+    ret_value = {"data": [FIN_SUMMARY_RECORD]}
+    cursor_value = "eyJkIjoiMjAyNS0wNC0wMSJ9"
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        cli.get_fin_summary_cursor(cursor=cursor_value)
+        args, _ = mock_get.call_args
+        assert args[1] == {"cursor": cursor_value}
+
+
+def test_get_fin_summary_cursor_returns_cursor():
+    """get_fin_summary_cursorがレスポンスのcursorを返すことを確認"""
+    cursor_value = "eyJkIjoiMjAyNS0wNC0wMSJ9"
+    ret_value = {"data": [FIN_SUMMARY_RECORD], "cursor": cursor_value}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_fin_summary_cursor(code="86970")
+        assert len(df) == 1
+        assert cursor == cursor_value
+
+
+def test_get_fin_summary_cursor_with_pagination():
+    """get_fin_summary_cursorがpagination_keyを自動処理して全件取得することを確認"""
+    page1 = {"data": [FIN_SUMMARY_RECORD], "pagination_key": "page2key"}
+    page2 = {"data": [FIN_SUMMARY_RECORD], "cursor": "eyJkIjoiMjAyNS0wNC0wMSJ9"}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.side_effect = [page1, page2]
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_fin_summary_cursor(code="86970")
+        assert len(df) == 2
+        assert cursor == "eyJkIjoiMjAyNS0wNC0wMSJ9"
+        assert mock_get.call_count == 2
+
+
+def test_get_fin_details_cursor():
+    """get_fin_details_cursorがtuple(DataFrame, cursor)を返すことを確認"""
+    ret_value = {"data": [FIN_DETAILS_RECORD]}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_fin_details_cursor(code="86970")
+        args, _ = mock_get.call_args
+        assert args[1] == {"code": "86970"}
+        assert len(df) == 1
+        assert cursor is None
+
+
+def test_get_fin_details_cursor_passes_cursor_param():
+    """get_fin_details_cursorがcursor引数をクエリパラメータに渡すことを確認"""
+    ret_value = {"data": [FIN_DETAILS_RECORD]}
+    cursor_value = "eyJkIjoiMjAyNS0wNC0wMSJ9"
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        cli.get_fin_details_cursor(cursor=cursor_value)
+        args, _ = mock_get.call_args
+        assert args[1] == {"cursor": cursor_value}
+
+
+def test_get_fin_details_cursor_returns_cursor():
+    """get_fin_details_cursorがレスポンスのcursorを返すことを確認"""
+    cursor_value = "eyJkIjoiMjAyNS0wNC0wMSJ9"
+    ret_value = {"data": [FIN_DETAILS_RECORD], "cursor": cursor_value}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.return_value = ret_value
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_fin_details_cursor(code="86970")
+        assert len(df) == 1
+        assert cursor == cursor_value
+
+
+def test_get_fin_details_cursor_with_pagination():
+    """get_fin_details_cursorがpagination_keyを自動処理して全件取得することを確認"""
+    page1 = {"data": [FIN_DETAILS_RECORD], "pagination_key": "page2key"}
+    page2 = {"data": [FIN_DETAILS_RECORD], "cursor": "eyJkIjoiMjAyNS0wNC0wMSJ9"}
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_get") as mock_get,
+    ):
+        mock_get.return_value.json.side_effect = [page1, page2]
+
+        cli = jquantsapi.ClientV2()
+        df, cursor = cli.get_fin_details_cursor(code="86970")
+        assert len(df) == 2
+        assert cursor == "eyJkIjoiMjAyNS0wNC0wMSJ9"
+        assert mock_get.call_count == 2
+
+
+def test_get_raises_with_api_error_message():
+    """_get()がエラー時にAPIのメッセージを含むHTTPErrorを送出することを確認"""
+    mock_resp = MagicMock()
+    mock_resp.ok = False
+    mock_resp.status_code = 403
+    mock_resp.url = "https://api.jquants.com/v2/equities/master"
+    mock_resp.json.return_value = {"message": "Forbidden - Invalid API key"}
+    mock_resp.text = '{"message": "Forbidden - Invalid API key"}'
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_request_session") as mock_session,
+        patch.object(jquantsapi.ClientV2, "_base_headers", return_value={}),
+    ):
+        mock_session.return_value.get.return_value = mock_resp
+        cli = jquantsapi.ClientV2()
+        with pytest.raises(
+            requests.exceptions.HTTPError, match="Forbidden - Invalid API key"
+        ):
+            cli._get("https://api.jquants.com/v2/equities/master")
+
+
+def test_get_raises_with_text_body_on_json_error():
+    """レスポンスがJSONでない場合にテキストボディでHTTPErrorを送出することを確認"""
+    mock_resp = MagicMock()
+    mock_resp.ok = False
+    mock_resp.status_code = 500
+    mock_resp.url = "https://api.jquants.com/v2/equities/master"
+    mock_resp.json.side_effect = ValueError("No JSON")
+    mock_resp.text = "Internal Server Error"
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_request_session") as mock_session,
+        patch.object(jquantsapi.ClientV2, "_base_headers", return_value={}),
+    ):
+        mock_session.return_value.get.return_value = mock_resp
+        cli = jquantsapi.ClientV2()
+        with pytest.raises(
+            requests.exceptions.HTTPError, match="Internal Server Error"
+        ):
+            cli._get("https://api.jquants.com/v2/equities/master")
+
+
+def test_get_success_does_not_raise():
+    """正常レスポンスの場合はエラーが送出されないことを確認"""
+    mock_resp = MagicMock()
+    mock_resp.ok = True
+    mock_resp.status_code = 200
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_request_session") as mock_session,
+        patch.object(jquantsapi.ClientV2, "_base_headers", return_value={}),
+    ):
+        mock_session.return_value.get.return_value = mock_resp
+        cli = jquantsapi.ClientV2()
+        result = cli._get("https://api.jquants.com/v2/equities/master")
+        assert result == mock_resp
+
+
+def test_get_error_has_response_attribute():
+    """HTTPErrorにresponseオブジェクトが付与されることを確認（後方互換性）"""
+    mock_resp = MagicMock()
+    mock_resp.ok = False
+    mock_resp.status_code = 401
+    mock_resp.url = "https://api.jquants.com/v2/equities/master"
+    mock_resp.json.return_value = {"message": "Unauthorized"}
+    mock_resp.text = '{"message": "Unauthorized"}'
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.object(jquantsapi.ClientV2, "_request_session") as mock_session,
+        patch.object(jquantsapi.ClientV2, "_base_headers", return_value={}),
+    ):
+        mock_session.return_value.get.return_value = mock_resp
+        cli = jquantsapi.ClientV2()
+        with pytest.raises(requests.exceptions.HTTPError) as exc_info:
+            cli._get("https://api.jquants.com/v2/equities/master")
+        assert exc_info.value.response == mock_resp
