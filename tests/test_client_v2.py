@@ -662,6 +662,75 @@ def test_retry_env_overrides_config():
         assert cli._retry_backoff_factor == 0.5  # 設定ファイルの値
 
 
+# ------------------------------------------------------------------
+# 並列実行数設定テスト
+# ------------------------------------------------------------------
+
+
+def test_default_max_workers():
+    """デフォルトの並列実行数の確認"""
+    with patch.object(
+        jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+    ):
+        cli = jquantsapi.ClientV2()
+        assert cli.MAX_WORKERS == 5
+
+
+def test_max_workers_from_config():
+    """設定ファイルから並列実行数を読み込めることの確認"""
+    config = {
+        "api_key": "dummy_key",
+        "max_workers": 8,
+    }
+    with patch.object(jquantsapi.ClientV2, "_load_config", return_value=config):
+        cli = jquantsapi.ClientV2()
+        assert cli.MAX_WORKERS == 8
+
+
+def test_max_workers_env_var():
+    """環境変数で並列実行数を変更できることの確認"""
+    env = {"JQUANTS_API_MAX_WORKERS": "10"}
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
+        cli = jquantsapi.ClientV2()
+        assert cli.MAX_WORKERS == 10
+
+
+def test_max_workers_env_overrides_config():
+    """環境変数が設定ファイルの並列実行数を上書きすることの確認"""
+    config = {
+        "api_key": "dummy_key",
+        "max_workers": 8,
+    }
+    env = {"JQUANTS_API_MAX_WORKERS": "3"}
+    with (
+        patch.object(jquantsapi.ClientV2, "_load_config", return_value=config),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
+        cli = jquantsapi.ClientV2()
+        assert cli.MAX_WORKERS == 3  # 環境変数で上書き
+
+
+def test_max_workers_applied_to_session():
+    """並列実行数がセッションのコネクションプールに反映されることの確認"""
+    env = {"JQUANTS_API_MAX_WORKERS": "10"}
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
+        cli = jquantsapi.ClientV2()
+        session = cli._request_session()
+        adapter = session.get_adapter("https://api.jquants.com")
+        assert adapter._pool_connections == 20  # MAX_WORKERS + 10
+        assert adapter._pool_maxsize == 20
+
+
 def test_retry_settings_applied_to_session():
     """リトライ設定がセッションに反映されることの確認"""
     with patch.object(

@@ -97,6 +97,11 @@ class ClientV2:
             または環境変数 (JQUANTS_API_RETRY_TOTAL, JQUANTS_API_RETRY_BACKOFF_FACTOR)
             で変更可能です。デフォルト: 最大10回、バックオフ係数1（1s, 2s, 4s, ...）。
 
+        並列実行数設定:
+            _range 系メソッドで API リクエストを並列実行する際のスレッド数です。
+            設定ファイル (max_workers) または環境変数 (JQUANTS_API_MAX_WORKERS)
+            で変更可能です。環境変数は設定ファイルより優先されます。デフォルト: 5。
+
         設定の読み込み順序（後のものが優先）:
             1. /content/drive/MyDrive/drive_ws/secret/jquants-api.toml (Google Colab のみ)
             2. ${HOME}/.jquants-api/jquants-api.toml
@@ -146,6 +151,11 @@ class ClientV2:
                 "JQUANTS_API_RETRY_BACKOFF_FACTOR", self._retry_backoff_factor
             )
         )
+
+        # 並列実行数設定
+        max_workers = int(config.get("max_workers", self.MAX_WORKERS))
+        # 環境変数が設定されている場合は上書き
+        self.MAX_WORKERS = int(os.environ.get("JQUANTS_API_MAX_WORKERS", max_workers))
 
         # API 実装 (v2)
         self._eq_master_api = EqMasterApiV2()

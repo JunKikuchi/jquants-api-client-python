@@ -109,6 +109,14 @@ jquantsapi/
 | `retry_total` | `JQUANTS_API_RETRY_TOTAL` | 最大リトライ回数 | `10` |
 | `retry_backoff_factor` | `JQUANTS_API_RETRY_BACKOFF_FACTOR` | 指数バックオフの係数 | `1` |
 
+### 並列実行数設定
+
+`_range` 系メソッドのスレッドプール並列数。設定ファイルと環境変数の両方で設定可能。環境変数が優先される。
+
+| 設定ファイルキー | 環境変数 | 説明 | デフォルト値 |
+|----------------|---------|------|------------|
+| `max_workers` | `JQUANTS_API_MAX_WORKERS` | 並列実行するスレッド数 | `5` |
+
 ## ビルド・リリース
 
 - **パッケージ管理**: Poetry

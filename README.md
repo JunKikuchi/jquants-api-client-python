@@ -262,6 +262,15 @@ cli = jquantsapi.ClientV2(rate_limiter=None)
 | `JQUANTS_API_RETRY_TOTAL` | `retry_total` | 最大リトライ回数 | `10` |
 | `JQUANTS_API_RETRY_BACKOFF_FACTOR` | `retry_backoff_factor` | 指数バックオフの係数 | `1` |
 
+### 並列実行数
+
+サフィックスが `_range` で終わるメソッドは、スレッドプールを使用して API リクエストを並列実行します。
+環境変数または設定ファイルで並列実行数を変更できます。
+
+| 環境変数 | 設定ファイルキー | 説明 | デフォルト値 |
+|---------|--------------|------|------------|
+| `JQUANTS_API_MAX_WORKERS` | `max_workers` | 並列実行するスレッド数 | `5` |
+
 ### 注意事項
 
 サフィックスが `_range` で終わるメソッド（例: `get_eq_bars_daily_range`、`get_fin_summary_range` など）は、指定された日付範囲に対して並列処理で繰り返し API リクエストを行います。
@@ -272,6 +281,32 @@ cli = jquantsapi.ClientV2(rate_limiter=None)
 それでもエラーが発生する場合は、より狭い日付範囲で分割してリクエストすることをご検討ください。
 
 ## 設定
+
+### 環境変数一覧
+
+設定可能な環境変数の一覧です。設定ファイル（`jquants-api.toml`）と環境変数の両方で設定されている場合は、環境変数が優先されます。
+
+#### V2 (ClientV2)
+
+| 環境変数 | 設定ファイルキー | 説明 | デフォルト値 |
+|---------|--------------|------|------------|
+| `JQUANTS_API_KEY` | `api_key` | J-Quants API v2 の API キー | - |
+| `JQUANTS_API_CLIENT_CONFIG_FILE` | - | 追加で読み込む設定ファイルのパス | - |
+| `JQUANTS_API_RATE_LIMIT` | `rate_limit` | 時間窓あたりの最大リクエスト数 | `5` |
+| `JQUANTS_API_RATE_LIMIT_PER` | `rate_limit_per` | レートリミットの時間窓の秒数 | `60.0` |
+| `JQUANTS_API_RATE_LIMIT_LOCK_FILE` | `rate_limit_lock_file` | レートリミット共有用ロックファイルのパス | `/tmp/jquants_rate.lock` |
+| `JQUANTS_API_RETRY_TOTAL` | `retry_total` | 429/5xx エラー時の最大リトライ回数 | `10` |
+| `JQUANTS_API_RETRY_BACKOFF_FACTOR` | `retry_backoff_factor` | 指数バックオフの係数 | `1` |
+| `JQUANTS_API_MAX_WORKERS` | `max_workers` | `_range` 系メソッドで並列実行するスレッド数 | `5` |
+
+#### V1 (Client) - Deprecated
+
+| 環境変数 | 設定ファイルキー | 説明 | デフォルト値 |
+|---------|--------------|------|------------|
+| `JQUANTS_API_MAIL_ADDRESS` | `mail_address` | J-Quants API 登録メールアドレス | - |
+| `JQUANTS_API_PASSWORD` | `password` | J-Quants API パスワード | - |
+| `JQUANTS_API_REFRESH_TOKEN` | `refresh_token` | リフレッシュトークン | - |
+| `JQUANTS_API_CLIENT_CONFIG_FILE` | - | 追加で読み込む設定ファイルのパス | - |
 
 ### V2 (ClientV2)
 
@@ -296,6 +331,7 @@ rate_limit_per = 60.0   # 時間窓の秒数（デフォルト: 60.0）
 rate_limit_lock_file = "/tmp/jquants_rate.lock"  # ロックファイルのパス
 retry_total = 10        # 最大リトライ回数（デフォルト: 10）
 retry_backoff_factor = 1  # 指数バックオフの係数（デフォルト: 1）
+max_workers = 5         # 並列実行するスレッド数（デフォルト: 5）
 ```
 
 ### V1 (Client) - Deprecated
