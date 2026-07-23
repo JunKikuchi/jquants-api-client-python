@@ -248,7 +248,8 @@ cli = jquantsapi.ClientV2(rate_limiter=None)
 | `JQUANTS_API_RATE_LIMIT_PER` | 時間窓の秒数 | `60.0` |
 | `JQUANTS_API_RATE_LIMIT_LOCK_FILE` | ロックファイルのパス | `/tmp/jquants_rate.lock` |
 
-レートリミッターは `fcntl.flock` によるファイルロックを使用しており、複数プロセス間でもレートリミットを共有できます（Unix/macOS のみ）。
+レートリミッターは `fcntl.flock` によるファイルロックを使用しており、複数プロセス間でもレートリミットを共有できます（Unix/macOS）。
+`fcntl` が利用できない Windows ではプロセス内ロックにフォールバックするため、レートリミットは同一プロセス内でのみ共有されます。
 
 ### リトライ設定
 
@@ -261,6 +262,8 @@ cli = jquantsapi.ClientV2(rate_limiter=None)
 |---------|--------------|------|------------|
 | `JQUANTS_API_RETRY_TOTAL` | `retry_total` | 最大リトライ回数 | `10` |
 | `JQUANTS_API_RETRY_BACKOFF_FACTOR` | `retry_backoff_factor` | 指数バックオフの係数 | `1` |
+
+なお、自動リトライは HTTP ライブラリ（urllib3）の内部で行われるため、リトライされたリクエストはクライアント側レートリミッターのトークンを消費しません（429 応答の `Retry-After` ヘッダは尊重されます）。
 
 ### 並列実行数
 
@@ -298,6 +301,8 @@ cli = jquantsapi.ClientV2(rate_limiter=None)
 | `JQUANTS_API_RETRY_TOTAL` | `retry_total` | 429/5xx エラー時の最大リトライ回数 | `10` |
 | `JQUANTS_API_RETRY_BACKOFF_FACTOR` | `retry_backoff_factor` | 指数バックオフの係数 | `1` |
 | `JQUANTS_API_MAX_WORKERS` | `max_workers` | `_range` 系メソッドで並列実行するスレッド数 | `5` |
+
+環境変数に空文字を設定した場合は未設定として扱われ、設定ファイルまたはデフォルト値が使用されます。
 
 #### V1 (Client) - Deprecated
 

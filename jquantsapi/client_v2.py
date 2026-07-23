@@ -56,6 +56,11 @@ DatetimeLike = Union[datetime, pd.Timestamp, str]
 _RATE_LIMITER_SENTINEL = object()
 
 
+def _env_or_default(name: str, default: Any) -> Any:
+    """環境変数の値を返す。未設定または空文字の場合は default を返す。"""
+    return os.environ.get(name) or default
+
+
 class ClientV2:
     """
     J-Quants API v2 用のクライアント
@@ -130,9 +135,11 @@ class ClientV2:
                 config.get("rate_limit_lock_file", "/tmp/jquants_rate.lock")
             )
             # 環境変数が設定されている場合は上書き
-            rate = float(os.environ.get("JQUANTS_API_RATE_LIMIT", rate))
-            per = float(os.environ.get("JQUANTS_API_RATE_LIMIT_PER", per))
-            lock_file = os.environ.get("JQUANTS_API_RATE_LIMIT_LOCK_FILE", lock_file)
+            rate = float(_env_or_default("JQUANTS_API_RATE_LIMIT", rate))
+            per = float(_env_or_default("JQUANTS_API_RATE_LIMIT_PER", per))
+            lock_file = str(
+                _env_or_default("JQUANTS_API_RATE_LIMIT_LOCK_FILE", lock_file)
+            )
             self._rate_limiter: Optional[SharedRateLimiter] = SharedRateLimiter(
                 rate=rate, per=per, lock_file=lock_file
             )
@@ -144,10 +151,10 @@ class ClientV2:
         self._retry_backoff_factor = float(config.get("retry_backoff_factor", 1))
         # 環境変数が設定されている場合は上書き
         self._retry_total = int(
-            os.environ.get("JQUANTS_API_RETRY_TOTAL", self._retry_total)
+            _env_or_default("JQUANTS_API_RETRY_TOTAL", self._retry_total)
         )
         self._retry_backoff_factor = float(
-            os.environ.get(
+            _env_or_default(
                 "JQUANTS_API_RETRY_BACKOFF_FACTOR", self._retry_backoff_factor
             )
         )
@@ -155,7 +162,7 @@ class ClientV2:
         # 並列実行数設定
         max_workers = int(config.get("max_workers", self.MAX_WORKERS))
         # 環境変数が設定されている場合は上書き
-        self.MAX_WORKERS = int(os.environ.get("JQUANTS_API_MAX_WORKERS", max_workers))
+        self.MAX_WORKERS = int(_env_or_default("JQUANTS_API_MAX_WORKERS", max_workers))
 
         # API 実装 (v2)
         self._eq_master_api = EqMasterApiV2()
@@ -225,7 +232,9 @@ class ClientV2:
             config = {**config, **self._read_config(env_config_path)}
 
         # env var (highest priority)
-        config["api_key"] = os.environ.get("JQUANTS_API_KEY", config.get("api_key", ""))
+        config["api_key"] = _env_or_default(
+            "JQUANTS_API_KEY", config.get("api_key", "")
+        )
 
         return config
 

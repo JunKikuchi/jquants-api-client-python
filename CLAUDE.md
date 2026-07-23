@@ -52,7 +52,7 @@ jquantsapi/
 ├── __init__.py        # 公開API: Client, ClientV2, SharedRateLimiter, MARKET_API_SECTIONS, BulkEndpoint
 ├── client.py          # V1クライアント（非推奨）
 ├── client_v2.py       # V2クライアント（現行）
-├── rate_limiter.py    # SharedRateLimiter（トークンバケット方式、fcntl.flockによるプロセス間共有）
+├── rate_limiter.py    # SharedRateLimiter（トークンバケット方式、fcntl.flockによるプロセス間共有、Windowsはプロセス内ロックにフォールバック）
 ├── constants.py       # カラム定義、セクター分類データ（17業種・33業種）
 ├── enums.py           # MARKET_API_SECTIONS, BulkEndpoint
 └── apis/

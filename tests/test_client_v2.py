@@ -1,3 +1,4 @@
+import os
 from contextlib import nullcontext as does_not_raise
 from datetime import datetime
 from typing import Any
@@ -11,6 +12,14 @@ from dateutil import tz
 import jquantsapi
 from jquantsapi import client_v2, constants
 from jquantsapi.rate_limiter import SharedRateLimiter
+
+
+@pytest.fixture(autouse=True)
+def clean_jquants_env(monkeypatch):
+    """テスト実行環境の JQUANTS_API_* 環境変数がテスト結果に影響しないよう削除する"""
+    for key in list(os.environ):
+        if key.startswith("JQUANTS_API_"):
+            monkeypatch.delenv(key)
 
 
 @pytest.mark.parametrize(
@@ -662,6 +671,54 @@ def test_retry_env_overrides_config():
         assert cli._retry_backoff_factor == 0.5  # 設定ファイルの値
 
 
+def test_empty_env_vars_treated_as_unset():
+    """空文字の環境変数は未設定として扱われ、デフォルト値が使用されることの確認"""
+    env = {
+        "JQUANTS_API_RATE_LIMIT": "",
+        "JQUANTS_API_RATE_LIMIT_PER": "",
+        "JQUANTS_API_RATE_LIMIT_LOCK_FILE": "",
+        "JQUANTS_API_RETRY_TOTAL": "",
+        "JQUANTS_API_RETRY_BACKOFF_FACTOR": "",
+        "JQUANTS_API_MAX_WORKERS": "",
+    }
+    with (
+        patch.object(
+            jquantsapi.ClientV2, "_load_config", return_value={"api_key": "dummy_key"}
+        ),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
+        cli = jquantsapi.ClientV2()
+        assert cli._rate_limiter is not None
+        assert cli._rate_limiter.rate == 5.0
+        assert cli._rate_limiter.per == 60.0
+        assert cli._rate_limiter.lock_file == "/tmp/jquants_rate.lock"
+        assert cli._retry_total == 10
+        assert cli._retry_backoff_factor == 1
+        assert cli.MAX_WORKERS == 5
+
+
+def test_empty_api_key_env_var_falls_back_to_config():
+    """空文字の JQUANTS_API_KEY は設定ファイルの api_key を上書きしないことの確認"""
+    env = {"JQUANTS_API_KEY": ""}
+    with (
+        patch.object(jquantsapi.ClientV2, "_read_config", return_value={}),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
+        config = jquantsapi.ClientV2.__new__(jquantsapi.ClientV2)._load_config()
+        assert config["api_key"] == ""
+
+    with (
+        patch.object(
+            jquantsapi.ClientV2,
+            "_read_config",
+            return_value={"api_key": "key_from_config"},
+        ),
+        patch.dict(client_v2.os.environ, env, clear=False),
+    ):
+        config = jquantsapi.ClientV2.__new__(jquantsapi.ClientV2)._load_config()
+        assert config["api_key"] == "key_from_config"
+
+
 # ------------------------------------------------------------------
 # 並列実行数設定テスト
 # ------------------------------------------------------------------
@@ -1155,7 +1212,7 @@ def test_get_raises_with_text_body_on_json_error():
         patch.object(jquantsapi.ClientV2, "_base_headers", return_value={}),
     ):
         mock_session.return_value.get.return_value = mock_resp
-        cli = jquantsapi.ClientV2()
+        cli = jquantsapi.ClientV2(rate_limiter=None)
         with pytest.raises(
             requests.exceptions.HTTPError, match="Internal Server Error"
         ):
@@ -1176,7 +1233,7 @@ def test_get_success_does_not_raise():
         patch.object(jquantsapi.ClientV2, "_base_headers", return_value={}),
     ):
         mock_session.return_value.get.return_value = mock_resp
-        cli = jquantsapi.ClientV2()
+        cli = jquantsapi.ClientV2(rate_limiter=None)
         result = cli._get("https://api.jquants.com/v2/equities/master")
         assert result == mock_resp
 
@@ -1198,7 +1255,7 @@ def test_get_error_has_response_attribute():
         patch.object(jquantsapi.ClientV2, "_base_headers", return_value={}),
     ):
         mock_session.return_value.get.return_value = mock_resp
-        cli = jquantsapi.ClientV2()
+        cli = jquantsapi.ClientV2(rate_limiter=None)
         with pytest.raises(requests.exceptions.HTTPError) as exc_info:
             cli._get("https://api.jquants.com/v2/equities/master")
         assert exc_info.value.response == mock_resp

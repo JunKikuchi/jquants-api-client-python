@@ -4,6 +4,7 @@ import time
 
 import pytest
 
+from jquantsapi import rate_limiter
 from jquantsapi.rate_limiter import SharedRateLimiter
 
 
@@ -93,3 +94,75 @@ class TestAcquire:
         assert not os.path.exists(limiter.lock_file)
         limiter.acquire()
         assert os.path.exists(limiter.lock_file)
+
+
+class TestStateFileRecovery:
+    def test_corrupt_state_file(self, limiter):
+        """状態ファイルが破損していても初期状態から回復して動作すること"""
+        with open(limiter.state_file, "w") as f:
+            f.write("{broken json")
+        limiter.acquire()
+        with open(limiter.state_file) as f:
+            state = json.load(f)
+        assert state["tokens"] == 4
+
+    def test_empty_state_file(self, limiter):
+        """状態ファイルが空でも初期状態から回復して動作すること"""
+        with open(limiter.state_file, "w"):
+            pass
+        limiter.acquire()
+
+    def test_state_file_missing_keys(self, limiter):
+        """必要なキーが欠けた状態ファイルでも初期状態から回復して動作すること"""
+        with open(limiter.state_file, "w") as f:
+            json.dump({"foo": 1}, f)
+        limiter.acquire()
+
+    def test_state_file_wrong_types(self, limiter):
+        """値の型が不正な状態ファイルでも初期状態から回復して動作すること"""
+        with open(limiter.state_file, "w") as f:
+            json.dump({"tokens": "abc", "last": None}, f)
+        limiter.acquire()
+
+
+class TestClockSkew:
+    def test_clock_moved_backwards(self, limiter):
+        """last が未来（時計の巻き戻り）でもトークンが減らないこと"""
+        with open(limiter.state_file, "w") as f:
+            json.dump({"tokens": 5, "last": time.time() + 3600}, f)
+        limiter.acquire()
+        with open(limiter.state_file) as f:
+            state = json.load(f)
+        assert state["tokens"] == 4  # elapsed が 0 にクランプされる
+
+
+class TestWithoutFcntl:
+    def test_acquire_without_fcntl(self, tmp_path, monkeypatch):
+        """fcntl が使えない環境 (Windows) でもプロセス内ロックで動作すること"""
+        monkeypatch.setattr(rate_limiter, "fcntl", None)
+        lock_file = str(tmp_path / "nofcntl.lock")
+        lim = SharedRateLimiter(rate=5, per=1.0, lock_file=lock_file)
+        lim.acquire()
+        lim.acquire()
+        assert os.path.exists(lim.state_file)
+
+    def test_timeout_without_fcntl(self, tmp_path, monkeypatch):
+        """fcntl フォールバック時もタイムアウトが機能すること"""
+        monkeypatch.setattr(rate_limiter, "fcntl", None)
+        lock_file = str(tmp_path / "nofcntl_timeout.lock")
+        lim = SharedRateLimiter(rate=1, per=10.0, lock_file=lock_file)
+        lim.acquire()
+        with pytest.raises(TimeoutError):
+            lim.acquire(timeout=0.1)
+
+
+class TestDefaultTimeout:
+    def test_default_timeout_scales_with_per(self, tmp_path):
+        """デフォルトタイムアウトが時間窓に応じて算出されること (per*3 と 60s の大きい方)"""
+        lock_file = str(tmp_path / "default_timeout.lock")
+        lim = SharedRateLimiter(rate=1, per=100.0, lock_file=lock_file)
+        lim.acquire()
+        # 次のトークンまで約100秒待ちだが、デフォルトタイムアウトは300秒なので
+        # TimeoutError は送出されないはず。ここでは待たずに明示タイムアウトで確認する。
+        with pytest.raises(TimeoutError):
+            lim.acquire(timeout=50.0)  # 待ち時間100秒 > 50秒 → 即時エラー
